@@ -234,6 +234,231 @@ class Anqh_Controller_Events extends Controller_Page {
 
 
 	/**
+	 * Action: import fi-rave
+	 */
+	public function action_firave() {
+		$this->history = false;
+
+		Permission::required(new Model_Flyer, Model_Flyer::PERMISSION_IMPORT, self::$user);
+
+		$this->view = new View_Page('Import fi-rave');
+
+		// klubitus
+		/*
+		if ($data = Arr::get($_POST, 'data')) {
+
+			// Get month
+			$month = Arr::get($_POST, 'month');
+
+			// Load events
+			$events = explode("\n", $data);
+			$this->view->add(View_Page::COLUMN_TOP, count($events) . ' events found for ' . $month . '/2000:<br />');
+			foreach ($events as $event) {
+				if (!$event) {
+					continue;
+				}
+
+				list($added, $day, $name, $homepage, $venue, $venue_url, $dj, $info) = explode('§', $event);
+
+				// Parse data
+				$price = preg_match('/([0-9]+) ?(?:mk|,\-)/', $info, $price) ? $price[1] : null;
+				if (is_null($price)) {
+					$price = preg_match('/ilmainen/', $info, $price) ? $price[1] : null;
+				}
+				$hours = preg_match('/([0-9]{2}\-[0-9]{2})/', $info, $hours) ? $hours[1] : null;
+				$age   = preg_match('/(?:ikäraja|k) ?([0-9]{2})/', $info, $age) ? $age[1] : null;
+				$info  = str_replace(array('<br>', "\n", "\r"), "\n", $info);
+				if ($hours) {
+					list($from, $to) = explode('-', $hours);
+					$begin = mktime((int)$from, 0, 0, $month, $day, 2000);
+					$end   = mktime((int)$to, 0, 0, $month, (int)$to, 2000);
+					if ($end < $begin) {
+						$end = strtotime('+1 day', $end);
+					}
+				} else {
+					$begin = mktime(22, 0, 0, $month, $day, 2000);
+					$end   = mktime(4, 0, 0, $month, $day + 1, 2000);
+				}
+
+				$this->view->add(View_Page::COLUMN_TOP, "$day. (" . date('j.n.Y', strtotime($added)) . ") $price mk, $hours, k$age, $name ($homepage) @ $venue ($venue_url), dj: $dj, info: $info<br />ADDING: ");
+
+				$ev = new Model_Event;
+				$ev->set_fields(array(
+					'name'        => $name,
+					'homepage'    => $homepage ? $homepage : null,
+					'venue_name'  => $venue ? $venue : null,
+					'venue_url'   => $venue_url ? $venue_url : null,
+					'stamp_begin' => $begin,
+					'stamp_end'   => $end,
+					'price'       => $price,
+					'age'         => $age,
+					'dj'          => trim($dj) ? $dj : null,
+					'info'        => trim($info) ? $info : null,
+					'city_name'   => 'Helsinki',
+					'author_id'   => self::$user->id,
+					'created'     => strtotime($added),
+					'modified'    => time()
+				));
+
+				try {
+					$ev->is_valid();
+					//$ev->save();
+					$this->view->add(View_Page::COLUMN_TOP, 'OK');
+				} catch (Validation_Exception $validation) {
+					$this->view->add(View_Page::COLUMN_TOP, 'FAILED: ' . Debug::dump($validation->array->errors('validation')));
+				}
+
+				$this->view->add(View_Page::COLUMN_TOP, '<br />');
+				//$this->view->add(View_Page::COLUMN_TOP, Debug::dump($ev));
+			}
+
+		} else {
+
+			// Show form
+			$form  = Form::open();
+			$form .= Form::input('month') . '<br />';
+			$form .= Form::textarea('data');
+			$form .= Form::submit('load', 'Load');
+			$form .= Form::close();
+
+			$this->view->add(View_Page::COLUMN_TOP, $form);
+
+		}
+
+		return;
+		*/
+
+		// Fi-rave
+		if ($source = Arr::get($_REQUEST, 'source')) {
+
+			// Load existing events
+			$res = DB::select('stamp_begin', 'name', 'id')
+				->from('events')
+				->where('stamp_begin', '<', mktime(0, 0, 0, 1, 1, 1999))
+				->execute();
+			$existing = array();
+			foreach ($res as $event) {
+				$date = date('Ymd', $event['stamp_begin']);
+				if (!isset($existing[$date])) {
+					$existing[$date] = array();
+				}
+				$existing[$date][$event['id']] = $event['name'];
+			}
+
+
+			// Load events
+			$html = iconv('ISO-8859-1', 'UTF-8', html_entity_decode(Request::factory($source)->execute()->body()));
+			if (preg_match_all('/\<li\>([0-9\.]*).*href="([^"]*)".(.*)\<\/a\>(?: at (.*))?/i', $html, $events, PREG_SET_ORDER)) {
+				$this->view->add(View_Page::COLUMN_TOP, count($events) . ' events found:<br />');
+
+				$max     = 25;
+				$current = 0;
+				foreach ($events as $event) {
+					list($match, $date, $url, $name, $city) = $event;
+
+					$day = date('Ymd', strtotime($date));
+					if ($id = array_search($name, (array)$existing[$day])) {
+						$found = true;
+						$this->view->add(View_Page::COLUMN_TOP, '<br />ID: ' . $id);
+						try {
+//							$info = iconv('ISO-8859-1', 'UTF-8', html_entity_decode(Request::factory('http://www.damicon.fi' . $url)->execute()->body()));
+//							$e = new Model_Event($id);
+//							$e->info = '[font=monospace]' . $info . '[/font]';
+//							$e->save();
+						} catch (Exception $e) {}
+					} else if (false) {
+						$found = false;
+						$ckey  = md5($url);
+						$info  = Anqh::cache_get($ckey);
+						if (!$info) {
+							if ($current++ < $max) {
+								try {
+									$info = iconv('ISO-8859-1', 'UTF-8', html_entity_decode(Request::factory('http://www.damicon.fi' . $url)->execute()->body()));
+									$info = preg_replace('/[ \t]+/', ' ', trim($info));
+									//Anqh::cache_set($ckey, $info, 60 * 5);
+									$this->view->add(View_Page::COLUMN_TOP, 'NOT CACHED: ');
+								} catch (Exception $e) {}
+							}
+						} else {
+							$this->view->add(View_Page::COLUMN_TOP, 'CACHED: ');
+						}
+
+						if (false && $info) {
+							$this->view->add(View_Page::COLUMN_TOP, nl2br($info));
+							$price = preg_match('/([0-9]+) ?(?:mk|[,:\.]\-|FIM)/i', $info, $price) ? $price[1] : null;
+							if (is_null($price)) {
+								$price = preg_match('/ilmainen/', $info, $price) ? $price[1] : null;
+							}
+							$hours = preg_match('/([012][0-9])(?:[\.:0-9]+)?(?: to |-| - )([012][0-9])/', $info, $hours) ? $hours[1] . '-' . $hours[2]: null;
+							$age   = preg_match('/(?:ikäraja|k|age limit|age)(?: |\-)?([0-9]{2})(?: ?v)?/i', $info, $age) ? $age[1] : null;
+							$venue = preg_match('/(?:at |@ )([a-zäöåÄÖÅ ]+)/i', $info, $venue) ? $venue[1] : null;
+							//$info  = str_replace(array('<br>', "\n", "\r"), "\n", $info);
+							if ($hours) {
+								list($from, $to) = explode('-', $hours);
+								$begin = strtotime('+' . (int)$from . ' hours', strtotime($date));
+								$end   = strtotime('+' . (int)$to . ' hours', strtotime($date));
+								if ($end < $begin) {
+									$end = strtotime('+1 day', $end);
+								}
+							} else {
+								$begin = strtotime('+22 hours', strtotime($date));
+								$end   = strtotime('+28 hours', strtotime($date));
+							}
+
+							$this->view->add(View_Page::COLUMN_TOP, "<br />PARSED: " . date('H:i', $begin) . "-" . date('H:i', $end) . ", $price mk, $hours, k$age, $name @ $venue / $city<br />");
+
+							// Save
+							$ev = new Model_Event;
+							$ev->set_fields(array(
+								'name'        => $name,
+								'venue_name'  => $venue ? $venue : null,
+								'stamp_begin' => $begin,
+								'stamp_end'   => $end,
+								'price'       => $price,
+								'age'         => $age,
+								'info'        => trim($info) ? $info : null,
+								'city_name'   => $city,
+								'author_id'   => self::$user->id,
+								'created'     => time(),
+							));
+
+							try {
+								$ev->is_valid();
+								//$ev->save();
+								$this->view->add(View_Page::COLUMN_TOP, 'OK: ' . HTML::anchor(Route::model($ev) . '/edit', $name, array('target' => '_blank')));
+							} catch (Validation_Exception $validation) {
+								$this->view->add(View_Page::COLUMN_TOP, 'FAILED: ' . Debug::dump($validation->array->errors('validation')));
+							}
+
+						}
+					}
+					$this->view->add(View_Page::COLUMN_TOP, ($found ? '<br /><strong>OLD</strong> ' : '<br /><strong>NEW</strong> ') . $date . ': ' . $name . ' (' . $url . ') @ ' . $city);
+					if (false && $info) {
+						$this->view->add(View_Page::COLUMN_TOP, '<hr />');
+					}
+
+				}
+			}
+
+		} else if ($_POST) {
+
+			// Save event
+
+		} else {
+
+			// Show form
+			$form  = Form::open(null, array('method' => 'GET'));
+			$form .= Form::input('source');
+			$form .= Form::submit('load', 'Load');
+			$form .= Form::close();
+
+			$this->view->add(View_Page::COLUMN_TOP, $form);
+
+		}
+	}
+
+
+	/**
 	 * Action: import flyers
 	 */
 	public function action_flyers() {
@@ -605,6 +830,10 @@ class Anqh_Controller_Events extends Controller_Page {
 			$this->page_actions[] = array(
 				'link' => Route::url('events', array('action' => 'flyers')),
 				'text' => '<i class="icon-download-alt"></i> ' . __('Import flyers'),
+			);
+			$this->page_actions[] = array(
+				'link' => Route::url('events', array('action' => 'firave')),
+				'text' => '<i class="icon-download-alt"></i> ' . __('Import fi-rave'),
 			);
 		}
 		if (Permission::has(new Model_Event, Model_Event::PERMISSION_CREATE, self::$user)) {
